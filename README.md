@@ -57,9 +57,11 @@ Every level shows the same city, with the same buildings and the same trees in t
 |---|---|---|
 | **High** | The full scene | Computers |
 | **Medium** | Smaller shadow maps, coarser trees, rocks and terrain in the distance, cheaper reflections, at most 2560x1440 | Phones with 8 GB of memory |
-| **Low** | The canals reflect only the sky, no ambient occlusion, light shafts or reflections on polished stone, coarser trees and terrain, at most 1280x720 | Other phones, and computers with 4 GB of memory or less |
+| **Low** | The canals reflect only the sky, no ambient occlusion, light shafts or reflections on polished stone, coarser trees and terrain, at most 1280x720 | Other phones, computers with 4 GB of memory or less, and computers whose browser runs on Intel graphics built into the processor |
 
-If loading crashes the tab or the graphics driver gives up, the page starts again one level lower. Your browser remembers the level and the resolution the scene settled on.
+If loading crashes the tab or the graphics driver gives up, the page starts again one level lower. After a few driver resets, Chrome, Edge and Opera turn WebGPU off until the browser restarts, so if the page says the browser offers no graphics card, close every browser window and open it again.
+
+On a laptop with two graphics chips the browser may run on the weaker one. In Windows, go to Settings → System → Display → Graphics, pick your browser and set it to **High performance**. Your browser remembers the level and the resolution the scene settled on.
 
 When frames come slower than 60 a second, the scene lowers its resolution in small steps and raises it again when there is room. This already happens behind the start menu, so most of the tuning is done before you enter.
 

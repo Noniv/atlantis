@@ -3,25 +3,20 @@ const $ = (id) => document.getElementById(id);
 const canvas = $('c'), info = $('i'), body = document.body;
 let dead = false; // the graphics device was lost
 const say = (m, to) => { if (!dead) $('s').textContent = m; $('b').style.transform = `scaleX(${to})`; return new Promise((r) => setTimeout(r, AUTO ? 0 : 40)); };
-const fail = (m) => { throw new Error(m, { cause: 1 }); };
-if (!navigator.gpu) fail('This scene needs WebGPU. Try a current Chrome or Edge.');
-// the dedicated card first; when the browser gives none for that, ask without a preference, then for the integrated one.
-// ?gpu=low: the integrated adapter, to test a slow machine
-let adapter = null;
-for (const p of QP.get('gpu') === 'low' ? ['low-power'] : ['high-performance', '', 'low-power'])
-  adapter ||= await navigator.gpu.requestAdapter(p ? { powerPreference: p } : {}).catch(() => null);
-if (!adapter) fail('Your browser has WebGPU but offers no graphics card for it. Turn on hardware acceleration in its settings, update the graphics driver, or try Chrome or Edge.');
+// the adapter was chosen in quality.js
 if (!adapter.features.has('indirect-first-instance')) fail('This graphics adapter lacks a WebGPU feature the scene needs (indirect-first-instance).');
 const hasTS = adapter.features.has('timestamp-query');
 const device = await adapter.requestDevice({ requiredFeatures: hasTS ? ['timestamp-query', 'indirect-first-instance'] : ['indirect-first-instance'] });
 window.__info = `${adapter.info.vendor} · ${adapter.info.architecture} · ${adapter.info.description}${adapter.info.isFallbackAdapter ? ' · FALLBACK (software)' : ''} · ${LVN[LV]}`;
 device.addEventListener('uncapturederror', (e) => console.error('GPU: ' + e.error.message.slice(0, 900)));
-// device lost (out of memory, driver reset): restart a level lower; on Low, say so
+// device lost (out of memory, driver reset): restart a level lower; on Low, say so. What was loading is kept for the
+// next visit's message and report (atlantisLost, cleared once a load survives)
 device.lost.then((l) => {
   if (l.reason === 'destroyed') return; // the page is closing
-  console.error(`device lost while "${$('s').textContent}": ${l.message}`);
+  const what = `${LVN[LV]}, "${$('s').textContent}": ${l.message}`.slice(0, 400);
+  console.error('device lost on ' + what); keep('atlantisLost', what);
   if (LV < 2 && !AUTO && !QP.has('lv')) { keep('atlantis', LV + 1); location.reload(); }
-  dead = true; body.className = 'l e'; $('s').textContent = 'The graphics device was lost. Reload the page to try again.';
+  dead = true; body.className = 'l e'; $('s').textContent = 'The graphics device was lost. Reload the page to try again, or restart the browser if that fails.';
 });
 const ctx = canvas.getContext('webgpu'), FMT = navigator.gpu.getPreferredCanvasFormat();
 const Q = device.queue, HDR = 'rgba16float', DEPTH = 'depth32float';
@@ -629,5 +624,5 @@ $('q').querySelectorAll('button').forEach((b, i) => { if (i === 2 - LV) b.classN
 lookAt(...POSES[4]); // the scene opens on viewpoint 5: the inner island, domes and crystal against the sun
 await say('Letting the light in…', 1);
 render(); await Q.onSubmittedWorkDone();
-setTimeout(keep, 15e3, 'atlantisLoad', ''); // the load counts as survived after 15 s
+setTimeout(() => { keep('atlantisLoad', ''); keep('atlantisLost', ''); }, 15e3); // the load counts as survived after 15 s
 if (!AUTO) { ui(true); requestAnimationFrame((t) => { F[LAST] = t; requestAnimationFrame(frame); }); } else { body.className = 'g'; window.__ready = true; }
