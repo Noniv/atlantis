@@ -7,7 +7,7 @@ import { transformSync } from 'esbuild';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 // concatenation order matters
-const FILES = ['report.js', 'math.js', 'quality.js', 'layout.js', 'sh_base.js', 'sh_scene.js', 'sh_light.js', 'sh_fx.js', 'meshes.js', 'plants.js', 'city.js', 'world.js', 'collide.js', 'main.js', 'music.js'];
+const FILES = ['math.js', 'quality.js', 'layout.js', 'sh_base.js', 'sh_scene.js', 'sh_light.js', 'sh_fx.js', 'meshes.js', 'plants.js', 'city.js', 'world.js', 'collide.js', 'main.js', 'music.js'];
 const dev = process.argv.includes('--dev'), readable = dev || process.argv.includes('--readable'), unpacked = process.argv.includes('--unpacked');
 const out = dev ? 'dev.html' : 'index.html';
 if (dev) FILES.push('dev.js');
@@ -15,7 +15,7 @@ if (dev) FILES.push('dev.js');
 let js = FILES.map((f) => readFileSync(path.join(here, 'src', f), 'utf8')).join('\n');
 const tpl = readFileSync(path.join(here, 'template.html'), 'utf8');
 // everything runs inside one async function; startup errors are shown on screen
-const wrap = (body) => `(async()=>{${body}\n})().catch(e=>{console.error(e);window.__err=e.message;window.__stk=e.stack;document.body.className='l e';document.getElementById('s').textContent=(e.cause?'':'Failed to start: ')+e.message});`;
+const wrap = (body) => `(async()=>{${body}\n})().catch(e=>{console.error(e);window.__err=e.message;document.body.className='l e';document.getElementById('s').textContent=(e.cause?'':'Failed to start: ')+e.message});`;
 
 // The minified script is deflated and stored 7 bits a character in a template literal; a small loader rebuilds the
 // bytes, inflates them with the browser's DecompressionStream and runs the result as a script. The 6 values that

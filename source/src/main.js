@@ -9,12 +9,11 @@ const hasTS = adapter.features.has('timestamp-query');
 const device = await adapter.requestDevice({ requiredFeatures: hasTS ? ['timestamp-query', 'indirect-first-instance'] : ['indirect-first-instance'] });
 window.__info = `${adapter.info.vendor} · ${adapter.info.architecture} · ${adapter.info.description}${adapter.info.isFallbackAdapter ? ' · FALLBACK (software)' : ''} · ${LVN[LV]}`;
 device.addEventListener('uncapturederror', (e) => console.error('GPU: ' + e.error.message.slice(0, 900)));
-// device lost (out of memory, driver reset): restart a level lower; on Low, say so. What was loading is kept for the
-// next visit's message and report (atlantisLost, cleared once a load survives)
+// device lost (out of memory, driver reset): restart a level lower; on Low, say so. atlantisLost tells the next load
+// why it may get no adapter (cleared once a load survives)
 device.lost.then((l) => {
   if (l.reason === 'destroyed') return; // the page is closing
-  const what = `${LVN[LV]}, "${$('s').textContent}": ${l.message}`.slice(0, 400);
-  console.error('device lost on ' + what); keep('atlantisLost', what);
+  console.error(`device lost while "${$('s').textContent}": ${l.message}`); keep('atlantisLost', 1);
   if (LV < 2 && !AUTO && !QP.has('lv')) { keep('atlantis', LV + 1); location.reload(); }
   dead = true; body.className = 'l e'; $('s').textContent = 'The graphics device was lost. Reload the page to try again, or restart the browser if that fails.';
 });
