@@ -5,9 +5,12 @@ let dead = false; // the graphics device was lost
 const say = (m, to) => { if (!dead) $('s').textContent = m; $('b').style.transform = `scaleX(${to})`; return new Promise((r) => setTimeout(r, AUTO ? 0 : 40)); };
 const fail = (m) => { throw new Error(m, { cause: 1 }); };
 if (!navigator.gpu) fail('This scene needs WebGPU. Try a current Chrome or Edge.');
+// the dedicated card first; when the browser gives none for that, ask without a preference, then for the integrated one.
 // ?gpu=low: the integrated adapter, to test a slow machine
-const adapter = await navigator.gpu.requestAdapter({ powerPreference: QP.get('gpu') === 'low' ? 'low-power' : 'high-performance' });
-if (!adapter) fail('No WebGPU adapter found.');
+let adapter = null;
+for (const p of QP.get('gpu') === 'low' ? ['low-power'] : ['high-performance', '', 'low-power'])
+  adapter ||= await navigator.gpu.requestAdapter(p ? { powerPreference: p } : {}).catch(() => null);
+if (!adapter) fail('Your browser has WebGPU but offers no graphics card for it. Turn on hardware acceleration in its settings, update the graphics driver, or try Chrome or Edge.');
 if (!adapter.features.has('indirect-first-instance')) fail('This graphics adapter lacks a WebGPU feature the scene needs (indirect-first-instance).');
 const hasTS = adapter.features.has('timestamp-query');
 const device = await adapter.requestDevice({ requiredFeatures: hasTS ? ['timestamp-query', 'indirect-first-instance'] : ['indirect-first-instance'] });
