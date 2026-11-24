@@ -4,7 +4,7 @@
 // surfaceAt(x, z, y): the floor and ceiling (under a bridge) the camera must keep between. The heights mirror the
 // numbers the meshes are built from (layout.js, meshes.js, city.js): change both together. Runs every frame; no allocation.
 const CLEAR = 0.9, CLEAR_W = 0.55; // clearance above solid ground, and above water
-const COL = new Float64Array(3); // last query: floor, ceiling, 1 where the floor is natural ground or water
+const COL = new Float64Array(4); // last query: floor, ceiling, 1 where the floor is natural ground or water, 1 where it is water
 let landY = null; // set by main.js once the world is built
 const TWX = new Float64Array(6), TWZ = new Float64Array(6); for (let k = 0; k < 6; k++) { TWX[k] = TOWER_R * cos(TOWERS[k]); TWZ[k] = TOWER_R * sin(TOWERS[k]); }
 const WQA0 = 205 * DEG, WQA1 = 290 * DEG; // sector of the west quay's steps, seen from its centre
@@ -36,16 +36,16 @@ function builtY(x, z, r, t) {
   return y;
 }
 // deck over open arches: on it or under it, decided by last frame's height so a long step can't pass through.
-// `under`: the surface below.
-function deck(top, under, y0) { if (y0 >= top - 0.1) { COL[0] = top + CLEAR; COL[1] = 1e9; } else { COL[0] = under + CLEAR_W; COL[1] = top - 1.2; } COL[2] = 0; }
+// `under`: the surface below; `wet`: it is water
+function deck(top, under, y0, wet = 1) { if (y0 >= top - 0.1) { COL[0] = top + CLEAR; COL[1] = 1e9; } else { COL[0] = under + CLEAR_W; COL[1] = top - 1.2; COL[3] = wet; } COL[2] = 0; }
 // canal between Rin and Rout: its water, or the spoke's bridge
 function canal(r, lat, Rin, Rout, hump, y0) {
   if (lat < SPOKE_W) deck(10.31 + hump * sin(PI * clamp((r - Rin + 0.4) / (Rout - Rin + 0.8), 0, 1)), WATER, y0);
-  else { COL[0] = WATER + CLEAR_W; COL[1] = 1e9; COL[2] = 1; }
+  else { COL[0] = WATER + CLEAR_W; COL[1] = 1e9; COL[2] = 1; COL[3] = 1; }
 }
 function surfaceAt(x, z, y0) {
   const r = hypot(x, z), t = atan2(z, x);
-  COL[1] = 1e9; COL[2] = 0;
+  COL[1] = 1e9; COL[2] = 0; COL[3] = 0;
   let lat = 1e9; for (let k = 0; k < 6; k++) { const a = angd(t, SPOKES[k]); if (abs(a) < PI / 2) { const l = abs(r * sin(a)); if (l < lat) lat = l; } }
   const ro = RB.out(t);
   if (r < ro + 0.66) {
@@ -54,7 +54,7 @@ function surfaceAt(x, z, y0) {
     else if (r < 9.2) f = crystalY(r);
     else if (r < 15.5) f = r < 9.6 ? 45.4 : 44.6; // drum under the lotus
     else if (r < 21) f = 42.2;
-    else if (r < 43.5) { f = 39.95 - CLEAR + CLEAR_W; COL[2] = 1; } // ring pool
+    else if (r < 43.5) { f = 39.95 - CLEAR + CLEAR_W; COL[2] = 1; COL[3] = 1; } // ring pool
     else if (r < 58) f = 40; // plaza and ledges (kerbs below the clearance)
     else if (r < 70.5) f = 30;
     else if (r < 85) f = 20;
@@ -63,7 +63,7 @@ function surfaceAt(x, z, y0) {
       if (r < m) {
         // moat: the spoke's bridge climbs from the quay to the stairway's foot
         if (lat < SPOKE_W) { deck(mix(14, 10.31, clamp((r - 92) / (m + 0.4 - 92), 0, 1)) + 0.5 * sin(PI * clamp((r - 92) / (m + 0.4 - 92), 0, 1)), WATER, y0); return; }
-        COL[0] = WATER + CLEAR_W; COL[2] = 1; return;
+        COL[0] = WATER + CLEAR_W; COL[2] = 1; COL[3] = 1; return;
       }
       const civ = RB.civ(t);
       if (r >= civ) {
@@ -97,7 +97,7 @@ function surfaceAt(x, z, y0) {
     else if (r > 634 && r < 646 && sa > 8 * DEG && sa < 37 * DEG) q = 2.7;
     if (q > h) { h = q; nat = 0; }
     // the pier starts on the quays' top terrace: no way under it there
-    if (abs(x) < SPOKE_W && z > 446 && z < 598) { if (h > 7.5) COL[0] = 10.3 + CLEAR; else deck(10.3, max(h, 0), y0); return; }
+    if (abs(x) < SPOKE_W && z > 446 && z < 598) { if (h > 7.5) COL[0] = 10.3 + CLEAR; else deck(10.3, max(h, 0), y0, h <= 0); return; }
   } else if (x < -790 && x > -915) {
     // west quay: round terrace and the steps down to the sea
     const dx = x - WQ[0], dz = z - WQ[1], d = hypot(dx, dz);
@@ -111,7 +111,7 @@ function surfaceAt(x, z, y0) {
   if (r < 900) { const b = builtY(x, z, r, t); if (b > h) { h = b; nat = 0; } }
   // sea, and the river in its valley
   let w = 0; if (z < RIV_Z0 && riverDist(x, z) < RIV_SHELF - 2) w = riverLevel(z);
-  if (h < w) COL[0] = w + CLEAR_W; else COL[0] = h + CLEAR;
+  if (h < w) { COL[0] = w + CLEAR_W; COL[3] = 1; } else COL[0] = h + CLEAR;
   COL[2] = nat;
 }
 // move the camera from (px, py, pz) towards F[CX..CZ] (velocity F[VX..VZ]), correcting both in place. Natural ground

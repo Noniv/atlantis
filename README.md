@@ -49,6 +49,23 @@ The ground, the water, quays, bridges (you can fly under their arches), the podi
 
 **On a touchscreen:** hold one finger down to fly forward and slide it to steer. Put a second finger down to go faster. The `≡` button in the corner opens the menu. A phone held upright shows the scene turned on its side, so it is always landscape.
 
+## In a headset
+
+[`xr.html`](xr.html) is the same city for **Apple Vision Pro**. Open it over HTTPS (for example via GitHub Pages; browsers do not expose WebXR on `file://`) in Safari (visionOS 26.2 or later, which can draw WebGPU inside WebXR) and press **Enter VR** in the menu. It is a separate file, about 137 KB, so `index.html` stays as small as it was.
+
+You arrive on the podium's plaza, facing the great crystal.
+
+| | Apple Vision Pro |
+|---|---|
+| Teleport | Look at the ground, pinch, let go. Move the pinching hand to choose which way you face when you land; lift it to cancel |
+| Turn | Pinch the sky and sweep your hand sideways |
+| Walk and fly | Pinch with both hands and pull them apart to move forward, or bring them together to move back. Letting go stops |
+| Wrist panel | Turn your left palm toward your face: **Fly**, **Turn** left and right, **Places** (the six viewpoints), **Music** and **Exit**. Tap a button with your right index finger, or look at it and pinch |
+
+On foot you stay on the ground: you climb stairs, and stop at the water's edge and at walls. **Fly** (or gliding while looking up) takes you off the ground, and flight follows where you look. A viewpoint in the air or over a canal leaves you flying. Every jump and teleport goes through a short fade to black, and turning or moving narrows the view a little at the edges, which keeps most people comfortable.
+
+Tested on Apple Vision Pro with a dedicated forward renderer that draws straight into each eye's foveated texture and adapts detail to hold frame rate (`?xrfps=` and `?xrlod=` tune target rate and LOD distance). Other headsets need a browser that offers WebGPU inside WebXR; Quest's browser keeps it behind a flag.
+
 ## Detail levels
 
 Every level shows the same city, with the same buildings and the same trees in the same places. What changes is how finely it is built and drawn.
@@ -97,6 +114,8 @@ This writes a new `index.html` next to this README. `npm run build:readable` wri
 
 `npm run build:dev` writes a separate `dev.html` with two extra tools: `F` flies the camera along a one-minute path through the whole city, and `B` runs that flight as a benchmark and reports frame and GPU times.
 
+`npm run build:xr` writes `xr.html`, the headset version. `npm run build:dev-xr` writes `dev-xr.html`, which pretends to be a headset in a desktop browser. Its **Enter VR** shows both eyes side by side, and `window.__xrsim` in the developer tools moves the head and makes pinches and hands. `?xrlayout=sbs`, `?xrsrgb` and `?xrroll=0.2` try the other kinds of headset texture and a tilted head.
+
 `index.html` is packed: the minified script is deflated and a small loader inflates it when the page opens, which takes a few milliseconds. `node build.mjs --unpacked` skips that step (194 KB).
 
 | File | What's inside |
@@ -116,6 +135,9 @@ This writes a new `index.html` next to this README. `npm run build:readable` wri
 | [`source/src/quality.js`](source/src/quality.js) | The detail levels and every number that depends on them |
 | [`source/src/math.js`](source/src/math.js) | Maths, seeded random numbers, noise and the mesh builder |
 | [`source/src/dev.js`](source/src/dev.js) | The fly-through and benchmark, only in `dev.html` |
+| [`source/src/xr.js`](source/src/xr.js) | The headset version, only in `xr.html`: entering VR, the city as the locomotion kit sees it, and drawing each eye, the floor markers and the wrist panel |
+| [`source/src/xrsim.js`](source/src/xrsim.js) | A pretend headset for the desktop, only in `dev-xr.html` |
+| [`source/lib/webxr-locomotion`](source/lib/webxr-locomotion) | The locomotion kit (MIT): teleport, turn, walk, fly and the wrist panel |
 | [`source/template.html`](source/template.html) | The page around the scene: the start menu, loading bar and links |
 
 Some easy first tweaks:
