@@ -62,6 +62,7 @@ struct View {
   misc: vec4f, // 1 = drop TAA history, view kind (0 main, 1 mirror, 2 shadow), lod scale, wind on/off
   lodc: vec4f, // LOD reference point; w: 1 / the level's distance scale
   lodb: vec4f, // x: minimum LOD distance (baked maps on Medium/Low: never the finest)
+  xrd: vec4f, // xr.js: the eye's projection's depth terms (P[10], P[14], P[11], P[15]), for the depth it hands the headset
 }
 `;
 // full-screen triangle

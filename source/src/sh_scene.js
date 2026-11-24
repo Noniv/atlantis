@@ -321,7 +321,7 @@ const FLOWERS = array<vec3f, 8>(vec3f(.52, .08, .24), vec3f(.8, .36, .5), vec3f(
     } else {
       // crown: one tone per card, shaded with the crown's normal
       let lod = max(0., .5 * log2(max(dot(lux * lq, lux * lq), dot(luy * lq, luy * lq)) * 4194304.));
-      if (c.a * cardRim(i.uv.xy, tile) < .5 - .05 * min(lod, 4.) - ${LEAFT}) { discard; }
+      if (c.a * cardRim(i.uv.xy, tile) < .5 - .05 * min(lod, 4.) - ${LEAFT.toFixed(1)}) { discard; }
       o.alb = tn * (.55 + .75 * c.r) * mix(vec3f(1.12, 1.03, .85), vec3f(.85, .97, 1.02), v);
       petal = FLOWERS[u32(i.tint.a * 255. + .5) & 7u] * (.75 + .6 * c.r) * (.85 + .3 * v); o.rough = .5;
     }
@@ -438,7 +438,7 @@ const FLOWERS = array<vec3f, 8>(vec3f(.52, .08, .24), vec3f(.8, .36, .5), vec3f(
       if (c.a * cardRim(i.uv.xy, tile) < .5 - .05 * min(lod, 4.)) { discard; }
     } else {
       let lod = max(0., .5 * log2(max(dot(lux * lq, lux * lq), dot(luy * lq, luy * lq)) * 4194304.));
-      if (c.a * cardRim(i.uv.xy, tile) < .5 - .05 * min(lod, 4.) - ${LEAFT}) { discard; }
+      if (c.a * cardRim(i.uv.xy, tile) < .5 - .05 * min(lod, 4.) - ${LEAFT.toFixed(1)}) { discard; }
     }
   }
 }
@@ -454,7 +454,7 @@ const W_GBUF_LOW = W_GBUF.replace(/discard;/g, '') + /*wgsl*/`
   if (i.mi.x >= 32u) {
     let wall = onWall(tile); let ex = dot(uvx * lq, uvx * lq); let ey = dot(uvy * lq, uvy * lq);
     let lod = max(0., .5 * log2(select(max(ex, ey), min(ex, ey), wall) * 4194304.));
-    if (c.a * cardRim(i.uv.xy, tile) < .5 - .05 * min(lod, 4.) - select(${LEAFT}, 0., wall)) { discard; }
+    if (c.a * cardRim(i.uv.xy, tile) < .5 - .05 * min(lod, 4.) - select(${LEAFT.toFixed(1)}, 0., wall)) { discard; }
   }
 }
 @fragment fn fsLeafLow(i: VO) -> GO {

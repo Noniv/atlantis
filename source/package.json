@@ -6,7 +6,9 @@
   "scripts": {
     "build": "node build.mjs",
     "build:readable": "node build.mjs --readable",
-    "build:dev": "node build.mjs --dev"
+    "build:dev": "node build.mjs --dev",
+    "build:xr": "node build.mjs --xr",
+    "build:dev-xr": "node build.mjs --dev --xr"
   },
   "devDependencies": {
     "esbuild": "^0.28.2"

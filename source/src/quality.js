@@ -9,11 +9,12 @@ const fail = (m) => { throw new Error(m, { cause: 1 }); };
 let lost; try { lost = localStorage.atlantisLost; } catch {}
 
 // the graphics adapter comes first, because it decides the level of a first visit. The dedicated card first; when the
-// browser gives none for that, ask without a preference, then for the integrated one. ?gpu=low: the integrated adapter
+// browser gives none for that, ask without a preference, then for the integrated one. ?gpu=low: the integrated adapter.
+// xr.html (XR, from build.mjs) asks first for one a headset can draw with, and takes any where there is no headset
 if (!navigator.gpu) fail('This scene needs WebGPU. Try a current Chrome or Edge.');
 let adapter = null;
-for (const p of QP.get('gpu') === 'low' ? ['low-power'] : ['high-performance', '', 'low-power'])
-  adapter ||= await navigator.gpu.requestAdapter(p ? { powerPreference: p } : {}).catch(() => null);
+for (const x of XR ? [1, 0] : [0]) for (const p of QP.get('gpu') === 'low' ? ['low-power'] : ['high-performance', '', 'low-power'])
+  adapter ||= await navigator.gpu.requestAdapter({ ...(p && { powerPreference: p }), ...(x && { xrCompatible: true }) }).catch(() => null);
 // no adapter after this page lost its device: Chromium turns WebGPU off for the session after a few GPU resets
 if (!adapter) fail(lost ? 'The graphics driver reset, and the browser has turned WebGPU off until it restarts. Close every browser window, open it again, and the city will load on a lower detail level.'
   : 'Your browser has WebGPU but offers no graphics card for it. Restart the browser, turn on hardware acceleration in its settings, update the graphics driver, or try Chrome or Edge.');

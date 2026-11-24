@@ -1,18 +1,26 @@
-// Bundles src/*.js into the single self-contained ../index.html
+// Bundles src/*.js into the single self-contained ../index.html (or ../xr.html, ../dev.html, ../dev-xr.html)
 import { readFileSync, writeFileSync } from 'node:fs';
 import { gzipSync, deflateRawSync } from 'node:zlib';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { transformSync } from 'esbuild';
+import { buildSync, transformSync } from 'esbuild';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 // concatenation order matters
 const FILES = ['math.js', 'quality.js', 'layout.js', 'sh_base.js', 'sh_scene.js', 'sh_light.js', 'sh_fx.js', 'meshes.js', 'plants.js', 'city.js', 'world.js', 'collide.js', 'main.js', 'music.js'];
 const dev = process.argv.includes('--dev'), readable = dev || process.argv.includes('--readable'), unpacked = process.argv.includes('--unpacked');
-const out = dev ? 'dev.html' : 'index.html';
+// --xr: xr.html, the city for headsets (xr.js and the locomotion kit in lib/); with --dev, dev-xr.html with a headset
+// simulator for the desktop (xrsim.js)
+const xr = process.argv.includes('--xr');
+const out = (dev ? 'dev' : xr ? 'xr' : 'index') + (dev && xr ? '-xr' : '') + '.html';
+if (xr) FILES.push('xr.js');
 if (dev) FILES.push('dev.js');
+if (dev && xr) FILES.unshift('xrsim.js');
 
-let js = FILES.map((f) => readFileSync(path.join(here, 'src', f), 'utf8')).join('\n');
+let js = `const XR = ${xr};\n` + FILES.map((f) => readFileSync(path.join(here, 'src', f), 'utf8')).join('\n');
+// the kit is ES modules: bundled into one global, LOCO, ahead of the scene
+if (xr) js = buildSync({ stdin: { contents: "export * from './src/index.js'; export * from './src/xr/index.js'; export * from './src/visuals/index.js';", resolveDir: path.join(here, 'lib', 'webxr-locomotion') },
+  bundle: true, format: 'iife', globalName: 'LOCO', target: 'es2022', write: false, legalComments: 'none' }).outputFiles[0].text + js;
 const tpl = readFileSync(path.join(here, 'template.html'), 'utf8');
 // everything runs inside one async function; startup errors are shown on screen
 const wrap = (body) => `(async()=>{${body}\n})().catch(e=>{console.error(e);window.__err=e.message;document.body.className='l e';document.getElementById('s').textContent=(e.cause?'':'Failed to start: ')+e.message});`;

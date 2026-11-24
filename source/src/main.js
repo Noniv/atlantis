@@ -75,30 +75,40 @@ const waterBG = [0, 1, 2, 3, 4].map((m) => blitBG(mipView(tWater, m)));
 const NU = 216, V_MAIN = 0, V_MIR = 1, V_SH = 2;
 const UB = [0, 1, 2].map(() => new Float32Array(NU)), ubo = UB.map(() => device.createBuffer({ size: NU * 4, usage: BU.UNIFORM | BU.COPY_DST }));
 const O_SM = 48, O_CAM = 112, O_RES = 116, O_JIT = 120, O_SUN = 124, O_SUNC = 128, O_RIGHT = 132, O_UP = 136, O_FWD = 140, O_PL = 144, O_PULSE = 168, O_MISC = 172, O_LODC = 176, O_LODB = 180;
-const TANH = tan(30 * DEG), NEAR = 0.3, EXPO = 0.8;
+const TANH = tan(30 * DEG), EXPO = 0.8;
+let NEAR = 0.3; // xr.js draws nearer while a headset session runs
 // sun at the ground: atmospheric transmittance x 1.35 (keeps sunlit paving warm rather than grey)
 const AT = atmo(), SUNC = AT.Ts.map((t) => t * E0 * 1.35);
 if (AUTO) console.log('sun at ground ' + SUNC.map((v) => v.toFixed(2)) + ' · psi ' + AT.PSI.map((v) => v.toFixed(4)));
 for (const U of UB) { U.set(SUN, O_SUN); U.set(SUNC, O_SUNC); U[O_SUNC + 3] = EXPO; U[O_MISC + 2] = 1; U[O_LODC + 3] = 1; }
-// camera matrices and frustum planes for a view at (cx, cy, cz), yaw / pitch
-function setCam(U, cx, cy, cz, yaw, pitch, W, H, jx, jy) {
-  const cp = cos(pitch), fy = sin(pitch), rx = cos(yaw), rz = sin(yaw), fx = cp * rz, fz = -cp * rx;
-  const ux = -rz * fy, uy = rz * fx - rx * fz, uz = rx * fy, asp = W / H, tx = TANH * asp, sx = 1 / tx, sy = 1 / TANH;
-  const tw = -(fx * cx + fy * cy + fz * cz), ox = -(rx * cx + rz * cz) * sx, oy = -(ux * cx + uy * cy + uz * cz) * sy;
-  // reversed depth, far plane at infinity; (jx, jy): sub-pixel jitter
-  U[0] = rx * sx + jx * fx; U[4] = jx * fy; U[8] = rz * sx + jx * fz; U[12] = ox + jx * tw;
-  U[1] = ux * sy + jy * fx; U[5] = uy * sy + jy * fy; U[9] = uz * sy + jy * fz; U[13] = oy + jy * tw;
+// camera matrices and frustum planes for a view at (cx, cy, cz) with axes B (right, up, forward: 9 numbers) and the
+// frustum's tangents tl..tr across and tb..tt up. Reversed depth, far plane at infinity; (jx, jy): sub-pixel jitter.
+// An off-centre frustum (a headset's eye) shifts ndc by a constant, like the jitter, so the shift rides in view.jit and
+// the shaders that rebuild rays from depth stay exact.
+function setView(U, cx, cy, cz, B, tl, tr, tb, tt, W, H, jx, jy) {
+  const rx = B[0], ry = B[1], rz = B[2], ux = B[3], uy = B[4], uz = B[5], fx = B[6], fy = B[7], fz = B[8];
+  const hx = (tr - tl) / 2, hy = (tt - tb) / 2, sx = 1 / hx, sy = 1 / hy, ex = jx - (tr + tl) / 2 / hx, ey = jy - (tt + tb) / 2 / hy;
+  const tw = -(fx * cx + fy * cy + fz * cz), ox = -(rx * cx + ry * cy + rz * cz) * sx, oy = -(ux * cx + uy * cy + uz * cz) * sy;
+  U[0] = rx * sx + ex * fx; U[4] = ry * sx + ex * fy; U[8] = rz * sx + ex * fz; U[12] = ox + ex * tw;
+  U[1] = ux * sy + ey * fx; U[5] = uy * sy + ey * fy; U[9] = uz * sy + ey * fz; U[13] = oy + ey * tw;
   U[2] = 0; U[6] = 0; U[10] = 0; U[14] = NEAR;
   U[3] = fx; U[7] = fy; U[11] = fz; U[15] = tw;
   U[O_CAM] = cx; U[O_CAM + 1] = cy; U[O_CAM + 2] = cz;
-  U[O_RES] = W; U[O_RES + 1] = H; U[O_RES + 2] = 1 / W; U[O_RES + 3] = 1 / H; U[O_JIT] = jx; U[O_JIT + 1] = jy;
-  U[O_RIGHT] = rx; U[O_RIGHT + 1] = 0; U[O_RIGHT + 2] = rz; U[O_RIGHT + 3] = tx;
-  U[O_UP] = ux; U[O_UP + 1] = uy; U[O_UP + 2] = uz; U[O_UP + 3] = TANH;
+  U[O_RES] = W; U[O_RES + 1] = H; U[O_RES + 2] = 1 / W; U[O_RES + 3] = 1 / H; U[O_JIT] = ex; U[O_JIT + 1] = ey;
+  U[O_RIGHT] = rx; U[O_RIGHT + 1] = ry; U[O_RIGHT + 2] = rz; U[O_RIGHT + 3] = hx;
+  U[O_UP] = ux; U[O_UP + 1] = uy; U[O_UP + 2] = uz; U[O_UP + 3] = hy;
   U[O_FWD] = fx; U[O_FWD + 1] = fy; U[O_FWD + 2] = fz; U[O_FWD + 3] = NEAR;
-  const lx = 1 / sqrt(tx * tx + 1), ly = 1 / sqrt(TANH * TANH + 1);
-  plane(U, 0, (fx * tx + rx) * lx, fy * tx * lx, (fz * tx + rz) * lx, cx, cy, cz, 0); plane(U, 1, (fx * tx - rx) * lx, fy * tx * lx, (fz * tx - rz) * lx, cx, cy, cz, 0);
-  plane(U, 2, (fx * TANH + ux) * ly, (fy * TANH + uy) * ly, (fz * TANH + uz) * ly, cx, cy, cz, 0); plane(U, 3, (fx * TANH - ux) * ly, (fy * TANH - uy) * ly, (fz * TANH - uz) * ly, cx, cy, cz, 0);
+  const l0 = 1 / sqrt(tl * tl + 1), l1 = 1 / sqrt(tr * tr + 1), l2 = 1 / sqrt(tb * tb + 1), l3 = 1 / sqrt(tt * tt + 1);
+  plane(U, 0, (rx - tl * fx) * l0, (ry - tl * fy) * l0, (rz - tl * fz) * l0, cx, cy, cz, 0); plane(U, 1, (tr * fx - rx) * l1, (tr * fy - ry) * l1, (tr * fz - rz) * l1, cx, cy, cz, 0);
+  plane(U, 2, (ux - tb * fx) * l2, (uy - tb * fy) * l2, (uz - tb * fz) * l2, cx, cy, cz, 0); plane(U, 3, (tt * fx - ux) * l3, (tt * fy - uy) * l3, (tt * fz - uz) * l3, cx, cy, cz, 0);
   plane(U, 4, fx, fy, fz, cx, cy, cz, 0); plane(U, 5, 0, 0, 0, 0, 0, 0, 1e9);
+}
+// the same for a view at (cx, cy, cz), yaw / pitch, 60 degrees high
+const CB = new Float64Array(9);
+function setCam(U, cx, cy, cz, yaw, pitch, W, H, jx, jy) {
+  const cp = cos(pitch), fy = sin(pitch), rx = cos(yaw), rz = sin(yaw), fx = cp * rz, fz = -cp * rx, tx = TANH * (W / H);
+  CB[0] = rx; CB[1] = 0; CB[2] = rz; CB[3] = -rz * fy; CB[4] = rz * fx - rx * fz; CB[5] = rx * fy; CB[6] = fx; CB[7] = fy; CB[8] = fz;
+  setView(U, cx, cy, cz, CB, -tx, tx, -TANH, TANH, W, H, jx, jy);
 }
 function plane(U, k, nx, ny, nz, px, py, pz, w) { const o = O_PL + k * 4; U[o] = nx; U[o + 1] = ny; U[o + 2] = nz; U[o + 3] = w - (nx * px + ny * py + nz * pz); }
 // sun shadow matrix: a box of half width R around (cx, cy, cz), written at float offset `at` of every view; with
@@ -307,14 +317,14 @@ let gpuN = 0, tsOn = false; // read back only while shown (stats overlay, benchm
 const tsB = (k) => (hasTS ? { querySet: qs, beginningOfPassWriteIndex: k * 2 } : undefined), tsE = (k) => (hasTS ? { querySet: qs, endOfPassWriteIndex: k * 2 + 1 } : undefined);
 const tsBE = (k) => (hasTS ? { querySet: qs, beginningOfPassWriteIndex: k * 2, endOfPassWriteIndex: k * 2 + 1 } : undefined);
 const passWaves = [0, 1, 2, 3, 4, 5].map((m) => ({ colorAttachments: [colorAtt(mipView(tWater, m), true)], timestampWrites: m === 0 ? tsB(0) : m === 5 ? tsE(0) : undefined }));
-const passCull = { timestampWrites: tsBE(1) };
+const passCull = { timestampWrites: tsBE(1) }, passCull2 = {};
 const passMirOff = { colorAttachments: [colorAtt(tDummyC.createView(), false)], timestampWrites: tsBE(3) }; // empty pass keeping the mirror stage's timing when the mirror is skipped
 passShadow.timestampWrites = tsBE(2);
 
 // render targets (rebuilt on resize)
 // drawn at up to `pix` pixels and stretched over the window; frame() adapts pix to hold 60 fps, starting where
 // the last visit left it. PIXTOP: a level's maximum.
-let W = 0, H = 0, MW = 0, MH = 0, DW = 0, DH = 0, targets = [], hist = null;
+let W = 0, H = 0, MW = 0, MH = 0, DW = 0, DH = 0, targets = [], hist = null, xrOn = false, lodx = 1; // xr.js: drawing to a headset, its LOD scale
 let passG, passG2, passGm, passAO, passVol, bgVol, passPolish, bgPolish, passLight, passLightM, passX1, passX1b, passXm, passWater, passX2, passTAA = [], passPost, bloomPass = [], bloomBG = [];
 let bgLight, bgLightM, bgAO, bgFx, bgFxM, bgTAA = [], bgPost = [], cpA, cpB, cpD, cpDc, cpSize;
 const NB = NBLOOM, FIXW = +QP.get('w') || 0, FIXH = +QP.get('h') || 0;
@@ -325,6 +335,7 @@ let dynN = 0, dynT = 0, dynMax = 0, dynG = 0, dynGN = 0, dynBad = 0, dynOk = 0, 
 // ?slow=N draws every frame N times (simulates a slower GPU)
 const DYN = !FIXW || QP.has('dyn'), SLOW = max(1, +QP.get('slow') | 0);
 function resize() {
+  if (xrOn) return;
   DW = FIXW || max(2, round(canvas.clientWidth * devicePixelRatio)); DH = FIXH || max(2, round(canvas.clientHeight * devicePixelRatio));
   const sc = min(1, sqrt(min(pix, PIXTOP) / (DW * DH))), w = max(2, round(DW * sc) & ~1), h = max(2, round(DH * sc) & ~1);
   if (w === W && h === H) return;
@@ -400,30 +411,39 @@ const JIT = new Float32Array(32); // Halton (2, 3) sub-pixel offsets
 for (let i = 0; i < 16; i++) { const h = (n, b) => { let f = 1, r = 0; while (n > 0) { f /= b; r += f * (n % b); n = floor(n / b); } return r; }; JIT[i * 2] = h(i + 1, 2) - 0.5; JIT[i * 2 + 1] = h(i + 1, 3) - 0.5; }
 const PVP = new Float32Array(16), submitList = [null];
 let hud = false;
-function render() {
-  const U = UB[V_MAIN], M = UB[V_MIR], S = UB[V_SH], fr = F[FRAME], t = F[TIME], par = fr & 1;
-  const cx = F[CX], cy = F[CY], cz = F[CZ], j = (fr & 15) * 2;
-  // unjittered first: that matrix is next frame's reprojection target
-  setCam(U, cx, cy, cz, F[YAW], F[PIT], W, H, 0, 0);
-  for (let i = 0; i < 16; i++) { U[32 + i] = PVP[i]; PVP[i] = U[i]; }
-  setCam(U, cx, cy, cz, F[YAW], F[PIT], W, H, JIT[j] * 2 / W, JIT[j + 1] * 2 / H);
+// one frame, or with V one headset eye (xr.js: its position, axes B, frustum, the head's centre and forward, and
+// fwd(), which draws the eye straight into its texture). A headset's two eyes are two submits, so each eye's uniforms
+// land before its passes; the waves and the sun's shadow are drawn once, with the first.
+function render(V) {
+  const U = UB[V_MAIN], M = UB[V_MIR], S = UB[V_SH], fr = F[FRAME], t = F[TIME], par = fr & 1, first = !V || !V.i;
+  const cx = V ? V.x : F[CX], cy = V ? V.y : F[CY], cz = V ? V.z : F[CZ], j = (fr & 15) * 2;
+  // LODs and the shadow cascade follow the head, the same for both eyes
+  const lx = V ? V.hx : cx, ly = V ? V.hy : cy, lz = V ? V.hz : cz;
+  if (V) setView(U, cx, cy, cz, V.B, V.tl, V.tr, V.tb, V.tt, W, H, 0, 0);
+  else {
+    // unjittered first: that matrix is next frame's reprojection target
+    setCam(U, cx, cy, cz, F[YAW], F[PIT], W, H, 0, 0);
+    for (let i = 0; i < 16; i++) { U[32 + i] = PVP[i]; PVP[i] = U[i]; }
+    setCam(U, cx, cy, cz, F[YAW], F[PIT], W, H, JIT[j] * 2 / W, JIT[j + 1] * 2 / H);
+  }
   U[O_CAM + 3] = t; U[O_JIT + 2] = fr; U[O_JIT + 3] = -1e9;
   // heartbeat: x = seconds since the last pulse, y = slow crystal breathing, z = flare as each pulse leaves
   const tp = t % PULSE, tq = (tp < PULSE / 2 ? tp : tp - PULSE) / 0.7;
   U[O_PULSE] = tp; U[O_PULSE + 1] = 0.5 + 0.5 * sin(t * TAU / 7); U[O_PULSE + 2] = exp(-tq * tq);
-  U[O_MISC] = F[RESET]; U[O_MISC + 1] = 0; U[O_MISC + 2] = LODK; U[O_MISC + 3] = 1; U[O_LODC] = cx; U[O_LODC + 1] = cy; U[O_LODC + 2] = cz; U[O_LODC + 3] = 1 / LODK;
+  U[O_MISC] = F[RESET]; U[O_MISC + 1] = 0; U[O_MISC + 2] = LODK * lodx; U[O_MISC + 3] = 1; U[O_LODC] = lx; U[O_LODC + 1] = ly; U[O_LODC + 2] = lz; U[O_LODC + 3] = 1 / LODK;
   // canal mirror only when canal water is in view and the camera is low enough (fades 170-235 m)
-  let mir = MIRROR ? 1 - sstep(170, 235, cy) : 0;
-  for (let k = 0; k < 5; k++) { const o = O_PL + k * 4; if (U[o + 1] * WATER + U[o + 3] < -445) mir = 0; }
+  let mir = !V && MIRROR ? 1 - sstep(170, 235, cy) : 0;
+  if (!V) for (let k = 0; k < 5; k++) { const o = O_PL + k * 4; if (U[o + 1] * WATER + U[o + 3] < -445) mir = 0; }
   U[O_PULSE + 3] = mir;
-  if (CASC) {
+  if (CASC && first) {
     // cascade: a 92 m box around the point 36 m ahead of the camera
-    shadowMat(O_SM, cx + U[O_FWD] * 36, cy + U[O_FWD + 1] * 36, cz + U[O_FWD + 2] * 36, 46, -420, 700, CASC, true);
+    const fx = V ? V.hf[0] : U[O_FWD], fy = V ? V.hf[1] : U[O_FWD + 1], fz = V ? V.hf[2] : U[O_FWD + 2];
+    shadowMat(O_SM, lx + fx * 36, ly + fy * 36, lz + fz * 36, 46, -420, 700, CASC, true);
     // casters switch LODs only a little sooner, or shadows pop on their own
-    S[O_CAM + 3] = t; S[O_MISC + 1] = 2; S[O_MISC + 2] = 1.85 * LODK; S[O_MISC + 3] = 1; S[O_LODC] = cx; S[O_LODC + 1] = cy; S[O_LODC + 2] = cz;
+    S[O_CAM + 3] = t; S[O_MISC + 1] = 2; S[O_MISC + 2] = 1.85 * LODK * lodx; S[O_MISC + 3] = 1; S[O_LODC] = lx; S[O_LODC + 1] = ly; S[O_LODC + 2] = lz;
     Q.writeBuffer(ubo[V_SH], 0, S);
   }
-  if (MIRROR) {
+  if (MIRROR && !V) {
     // mirror camera: below the water plane, looking up
     setCam(M, cx, 2 * WATER - cy, cz, F[YAW], -F[PIT], MW, MH, 0, 0);
     M[O_CAM + 3] = t; M[O_JIT + 2] = fr; M[O_JIT + 3] = WATER - 0.05; for (let i = 0; i < 4; i++) M[O_PULSE + i] = U[O_PULSE + i];
@@ -432,19 +452,28 @@ function render() {
     Q.writeBuffer(ubo[V_MIR], 0, M);
   }
   Q.writeBuffer(ubo[V_MAIN], 0, U);
-  WT[0] = t; Q.writeBuffer(uboW, 0, WT);
+  WT[0] = t; if (first) Q.writeBuffer(uboW, 0, WT);
 
   const e = device.createCommandEncoder();
-  let slot = null;
+  let slot = null, r;
   // GPU timings: while shown, and every 8th frame while tuning resolution
-  if (tsOn || (dynOn && (fr & 7) === 0)) for (let i = 0; i < qRead.length; i++) if (!qRead[i].busy) { slot = qRead[i]; break; }
-  let r = e.beginRenderPass(passWaves[0]); r.setPipeline(pWaves); r.setBindGroup(0, bgWaves); r.draw(3); r.end();
-  for (let i = 1; i < 6; i++) { r = e.beginRenderPass(passWaves[i]); r.setPipeline(pMip[HDR]); r.setBindGroup(0, waterBG[i - 1]); r.draw(3); r.end(); }
+  if (!V && (tsOn || (dynOn && (fr & 7) === 0))) for (let i = 0; i < qRead.length; i++) if (!qRead[i].busy) { slot = qRead[i]; break; }
+  if (first) {
+    r = e.beginRenderPass(passWaves[0]); r.setPipeline(pWaves); r.setBindGroup(0, bgWaves); r.draw(3); r.end();
+    for (let i = 1; i < 6; i++) { r = e.beginRenderPass(passWaves[i]); r.setPipeline(pMip[HDR]); r.setBindGroup(0, waterBG[i - 1]); r.draw(3); r.end(); }
+  }
   // visibility and LOD for the three views
-  const c = e.beginComputePass(passCull); cullView(c, V_MAIN); if (mir > 0) cullView(c, V_MIR); if (CASC) cullView(c, V_SH); c.end();
-  if (CASC) {
+  const c = e.beginComputePass(V ? passCull2 : passCull); cullView(c, V_MAIN); if (mir > 0) cullView(c, V_MIR); if (CASC && first) cullView(c, V_SH); c.end();
+  if (CASC && first) {
     r = e.beginRenderPass(passShadow); r.setBindGroup(0, bgScene[V_SH]); r.setVertexBuffer(0, vbMesh); r.setIndexBuffer(ibMesh, 'uint32');
     r.setPipeline(pSh32[0]); drawList(r, V_SH, LS[K.SOLID].near); r.setPipeline(pSh32[1]); drawList(r, V_SH, LS[K.LEAF].near); r.end();
+  }
+  // a headset eye (xr.js): its own passes draw the scene straight into the eye's texture
+  if (V) {
+    V.fwd(e);
+    submitList[0] = e.finish(); Q.submit(submitList);
+    if (V.last) { F[FRAME] = fr + 1; F[RESET] = 0; }
+    return;
   }
   // mirror view: G-buffer, lighting, crystal and glass
   if (mir > 0) {
@@ -537,7 +566,7 @@ function tune() {
 }
 function frame(now) {
   requestAnimationFrame(frame);
-  if (dead || document.hidden) return;
+  if (dead || xrOn || document.hidden) return;
   const dtr = now - F[LAST];
   if (FPS && dtr < 1000 / FPS - 1) return;
   F[LAST] = now;

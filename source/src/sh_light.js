@@ -136,40 +136,9 @@ const W_VOL = W_COMMON + W_FS + /*wgsl*/`
 }
 `;
 
-// deferred lighting
-const W_LIGHT = W_COMMON + W_FS + /*wgsl*/`
-@group(0) @binding(0) var<uniform> view: View;
-@group(0) @binding(1) var sLin: sampler;
-@group(0) @binding(2) var sRep: sampler;
-@group(0) @binding(3) var sCmp: sampler_comparison;
-@group(0) @binding(4) var tG0: texture_2d<f32>;
-@group(0) @binding(5) var tG1: texture_2d<f32>;
-@group(0) @binding(6) var tG2: texture_2d<f32>;
-@group(0) @binding(7) var tD: texture_depth_2d;
-@group(0) @binding(8) var tAO: texture_2d<f32>;
-@group(0) @binding(9) var tSky: texture_2d<f32>;
-@group(0) @binding(10) var tEnv: texture_cube<f32>;
-@group(0) @binding(11) var tIrr: texture_cube<f32>;
-@group(0) @binding(12) var tSh0: texture_depth_2d;
-@group(0) @binding(13) var tSh1: texture_depth_2d;
-@group(0) @binding(14) var tSh2: texture_depth_2d;
-@group(0) @binding(15) var tSh3: texture_depth_2d;
-@group(0) @binding(16) var tWater: texture_2d<f32>;
-@group(0) @binding(17) var tNoiseA: texture_2d<f32>;
-@group(0) @binding(18) var tTop: texture_2d<f32>;
-@group(0) @binding(19) var tVol: texture_2d<f32>;
-` + W_SKY + W_SHADOWLIB + W_SHADE + /*wgsl*/`
-// SSAO over a 4 x 4 half-res box (one full pattern period, so it cancels), depth-weighted against bleeding
-fn ssao(fc: vec2f, z: f32) -> f32 {
-  let b = vec2i(floor(fc * .5 - .5)); let mx = vec2i(textureDimensions(tAO)) - 1; var acc = 0.; var ws = 0.;
-  for (var y = -1; y <= 2; y++) { for (var x = -1; x <= 2; x++) {
-    let r = textureLoad(tAO, clamp(b + vec2i(x, y), vec2i(0), mx), 0).rg;
-    let w = 1. / (.02 + abs(r.g - z) / z);
-    acc += r.r * w; ws += w;
-  } }
-  return acc / ws;
-}
-// sky seen past roofs and crowns, from the top-down height map: darker ambient in streets and under trees
+// pieces of the deferred lighting and the final image, shared with xr.js's forward renderer (split at line
+// boundaries: the deferred shaders' text is the same)
+const W_LIGHT_SKYVIS = /*wgsl*/`// sky seen past roofs and crowns, from the top-down height map: darker ambient in streets and under trees
 fn skyVis(p: vec3f, n: vec3f) -> f32 {
   let q = p + n * 1.3; let uv = q.xz / 1024. + .5;
   if (max(abs(uv.x - .5), abs(uv.y - .5)) > .495) { return 1.; }
@@ -190,32 +159,8 @@ fn surround(R: vec3f, env: vec3f, wp: vec3f) -> vec3f {
   c = mix(c, mix(vec3f(.07, .1, .04), vec3f(.46, .43, .37), ss(.4, .6, n.b + m.a * .5)), ss(-.06, -.3, R.y));
   return mix(env, c * E, k);
 }
-// sunlit haze in front of the pixel: shaft texture, depth-weighted upsample, times forward scattering
-fn shafts(fc: vec2f, z: f32, rd: vec3f) -> vec3f {
-  if (view.misc.y > .5) { return vec3f(0.); }
-  let mu = dot(rd, view.sun.xyz); let g = .78; let hg = (1. - g * g) / (4. * PI * pow(1. + g * g - 2. * g * mu, 1.5));
-  // Low: no shaft texture, haze taken as fully sunlit
-  if (LV > 1) { return view.sunc.rgb * (min(hg, .8) * 1.2e-5 + 1e-6) * min(z / max(dot(rd, view.fwd.xyz), 1e-3), 800.) * exp(-max(view.cam.y, 0.) / 650.) * .85; }
-  let h = fc * .25 - .5; let b = floor(h); let f = h - b; let mx = vec2i(textureDimensions(tVol)) - 1; var acc = 0.; var ws = 0.;
-  for (var k = 0; k < 4; k++) {
-    let o = vec2i(k & 1, k >> 1); let r = textureLoad(tVol, clamp(vec2i(b) + o, vec2i(0), mx), 0).rg;
-    let w = (mix(1. - f.x, f.x, f32(o.x)) * mix(1. - f.y, f.y, f32(o.y)) + .03) / (.03 + abs(min(r.g, 800.) - min(z, 800.)) / min(z, 800.));
-    acc += r.r * w; ws += w;
-  }
-  return view.sunc.rgb * (min(hg, .8) * 1.2e-5 + 1e-6) * acc / ws * 800.;
-}
-@fragment fn fs(@builtin(position) fc: vec4f) -> @location(0) vec4f {
-  let px = vec2i(fc.xy); let dp = textureLoad(tD, px, 0);
-  let ndc = fc.xy * view.res.zw * vec2f(2., -2.) + vec2f(-1., 1.) - view.jit.xy;
-  let ray = view.fwd.xyz + view.right.xyz * ndc.x * view.right.w + view.up.xyz * ndc.y * view.up.w; let rd = normalize(ray);
-  if (dp == 0.) {
-    // nothing drawn below the horizon: the sea beyond its 95 km mesh, long dissolved into haze, so show the haze
-    if (rd.y < 0.) { return vec4f(aerial(vec3f(0.), view.cam.xyz, rd, view.cam.y / max(0. - rd.y, 1e-5)) + shafts(fc.xy, 1e6, rd), 1.); }
-    return vec4f(sky(rd, true) + shafts(fc.xy, 1e6, rd), 1.);
-  }
-  let z = view.fwd.w / dp; let wp = view.cam.xyz + ray * z; let dist = z * length(ray);
-  let g0 = textureLoad(tG0, px, 0); let g1 = textureLoad(tG1, px, 0); let g2 = textureLoad(tG2, px, 0);
-  let alb = g0.rgb * g0.rgb; let N = normalize(g1.xyz); let rough = g1.a; let metal = g2.g; let trans = g2.b;
+`;
+const W_LIGHT_BODY = /*wgsl*/`  let alb = g0.rgb * g0.rgb; let N = normalize(g1.xyz); let rough = g1.a; let metal = g2.g; let trans = g2.b;
   let V = -rd; let L = view.sun.xyz;
   let sh = shadow(wp, N);
   var ao = g2.r;
@@ -265,7 +210,78 @@ fn shafts(fc: vec2f, z: f32, rd: vec3f) -> vec3f {
   col += dc * vec3f(.75, .9, 1.) * (.5 + .5 * view.pulse.y + 1.6 * view.pulse.z) * 28. / (dl + 90.) * sat(dot(N, lc) * inverseSqrt(dl) * .7 + .3) * ao;
   // the pulse runs along gold inlay and sweeps a ring of light near the ground
   col += pu * g0.a * 9. + dc * pu * .55 * exp(-max(wp.y - 12., 0.) / 40.) * (.4 + .6 * ao);
-  return vec4f(aerial(col, view.cam.xyz, rd, dist) + shafts(fc.xy, z, rd), 1.);
+`;
+const W_AGX = /*wgsl*/`// AgX: rolls bright colours off to white instead of clipping hue
+fn agxCurve(x: vec3f) -> vec3f { let x2 = x * x; let x4 = x2 * x2; return 15.5 * x4 * x2 - 40.14 * x4 * x + 31.96 * x4 - 6.868 * x2 * x + .4298 * x2 + .1191 * x - .00232; }
+fn agx(c: vec3f) -> vec3f {
+  let m = mat3x3f(.842479062253094, .0423282422610123, .0423756549057051, .0784335999999992, .878468636469772, .0784336, .0792237451477643, .0791661274605434, .879142973793104);
+  let mi = mat3x3f(1.19687900512017, -.0528968517574562, -.0529716355144438, -.0980208811401368, 1.15190312990417, -.0980434501171241, -.0990297440797205, -.0989611768448433, 1.15107367264116);
+  var v = agxCurve((clamp(log2(max(m * c, vec3f(1e-10))), vec3f(-12.47393), vec3f(4.026069)) + 12.47393) / 16.5);
+  // look: a little more contrast and saturation
+  let l = lum(v); v = pow(max(v, vec3f(0.)), vec3f(1.14)); v = l + 1.3 * (v - l) + (pow(l, 1.14) - l);
+  return sat3(mi * v);
+}
+`;
+
+// deferred lighting
+const W_LIGHT = W_COMMON + W_FS + /*wgsl*/`
+@group(0) @binding(0) var<uniform> view: View;
+@group(0) @binding(1) var sLin: sampler;
+@group(0) @binding(2) var sRep: sampler;
+@group(0) @binding(3) var sCmp: sampler_comparison;
+@group(0) @binding(4) var tG0: texture_2d<f32>;
+@group(0) @binding(5) var tG1: texture_2d<f32>;
+@group(0) @binding(6) var tG2: texture_2d<f32>;
+@group(0) @binding(7) var tD: texture_depth_2d;
+@group(0) @binding(8) var tAO: texture_2d<f32>;
+@group(0) @binding(9) var tSky: texture_2d<f32>;
+@group(0) @binding(10) var tEnv: texture_cube<f32>;
+@group(0) @binding(11) var tIrr: texture_cube<f32>;
+@group(0) @binding(12) var tSh0: texture_depth_2d;
+@group(0) @binding(13) var tSh1: texture_depth_2d;
+@group(0) @binding(14) var tSh2: texture_depth_2d;
+@group(0) @binding(15) var tSh3: texture_depth_2d;
+@group(0) @binding(16) var tWater: texture_2d<f32>;
+@group(0) @binding(17) var tNoiseA: texture_2d<f32>;
+@group(0) @binding(18) var tTop: texture_2d<f32>;
+@group(0) @binding(19) var tVol: texture_2d<f32>;
+` + W_SKY + W_SHADOWLIB + W_SHADE + /*wgsl*/`
+// SSAO over a 4 x 4 half-res box (one full pattern period, so it cancels), depth-weighted against bleeding
+fn ssao(fc: vec2f, z: f32) -> f32 {
+  let b = vec2i(floor(fc * .5 - .5)); let mx = vec2i(textureDimensions(tAO)) - 1; var acc = 0.; var ws = 0.;
+  for (var y = -1; y <= 2; y++) { for (var x = -1; x <= 2; x++) {
+    let r = textureLoad(tAO, clamp(b + vec2i(x, y), vec2i(0), mx), 0).rg;
+    let w = 1. / (.02 + abs(r.g - z) / z);
+    acc += r.r * w; ws += w;
+  } }
+  return acc / ws;
+}
+` + W_LIGHT_SKYVIS + /*wgsl*/`// sunlit haze in front of the pixel: shaft texture, depth-weighted upsample, times forward scattering
+fn shafts(fc: vec2f, z: f32, rd: vec3f) -> vec3f {
+  if (view.misc.y > .5) { return vec3f(0.); }
+  let mu = dot(rd, view.sun.xyz); let g = .78; let hg = (1. - g * g) / (4. * PI * pow(1. + g * g - 2. * g * mu, 1.5));
+  // Low: no shaft texture, haze taken as fully sunlit
+  if (LV > 1) { return view.sunc.rgb * (min(hg, .8) * 1.2e-5 + 1e-6) * min(z / max(dot(rd, view.fwd.xyz), 1e-3), 800.) * exp(-max(view.cam.y, 0.) / 650.) * .85; }
+  let h = fc * .25 - .5; let b = floor(h); let f = h - b; let mx = vec2i(textureDimensions(tVol)) - 1; var acc = 0.; var ws = 0.;
+  for (var k = 0; k < 4; k++) {
+    let o = vec2i(k & 1, k >> 1); let r = textureLoad(tVol, clamp(vec2i(b) + o, vec2i(0), mx), 0).rg;
+    let w = (mix(1. - f.x, f.x, f32(o.x)) * mix(1. - f.y, f.y, f32(o.y)) + .03) / (.03 + abs(min(r.g, 800.) - min(z, 800.)) / min(z, 800.));
+    acc += r.r * w; ws += w;
+  }
+  return view.sunc.rgb * (min(hg, .8) * 1.2e-5 + 1e-6) * acc / ws * 800.;
+}
+@fragment fn fs(@builtin(position) fc: vec4f) -> @location(0) vec4f {
+  let px = vec2i(fc.xy); let dp = textureLoad(tD, px, 0);
+  let ndc = fc.xy * view.res.zw * vec2f(2., -2.) + vec2f(-1., 1.) - view.jit.xy;
+  let ray = view.fwd.xyz + view.right.xyz * ndc.x * view.right.w + view.up.xyz * ndc.y * view.up.w; let rd = normalize(ray);
+  if (dp == 0.) {
+    // nothing drawn below the horizon: the sea beyond its 95 km mesh, long dissolved into haze, so show the haze
+    if (rd.y < 0.) { return vec4f(aerial(vec3f(0.), view.cam.xyz, rd, view.cam.y / max(0. - rd.y, 1e-5)) + shafts(fc.xy, 1e6, rd), 1.); }
+    return vec4f(sky(rd, true) + shafts(fc.xy, 1e6, rd), 1.);
+  }
+  let z = view.fwd.w / dp; let wp = view.cam.xyz + ray * z; let dist = z * length(ray);
+  let g0 = textureLoad(tG0, px, 0); let g1 = textureLoad(tG1, px, 0); let g2 = textureLoad(tG2, px, 0);
+` + W_LIGHT_BODY + /*wgsl*/`  return vec4f(aerial(col, view.cam.xyz, rd, dist) + shafts(fc.xy, z, rd), 1.);
 }
 `;
 
@@ -320,17 +336,7 @@ const W_POST = W_COMMON + W_FS + /*wgsl*/`
 @group(0) @binding(1) var sLin: sampler;
 @group(0) @binding(2) var tC: texture_2d<f32>;
 @group(0) @binding(3) var tB: texture_2d<f32>;
-// AgX: rolls bright colours off to white instead of clipping hue
-fn agxCurve(x: vec3f) -> vec3f { let x2 = x * x; let x4 = x2 * x2; return 15.5 * x4 * x2 - 40.14 * x4 * x + 31.96 * x4 - 6.868 * x2 * x + .4298 * x2 + .1191 * x - .00232; }
-fn agx(c: vec3f) -> vec3f {
-  let m = mat3x3f(.842479062253094, .0423282422610123, .0423756549057051, .0784335999999992, .878468636469772, .0784336, .0792237451477643, .0791661274605434, .879142973793104);
-  let mi = mat3x3f(1.19687900512017, -.0528968517574562, -.0529716355144438, -.0980208811401368, 1.15190312990417, -.0980434501171241, -.0990297440797205, -.0989611768448433, 1.15107367264116);
-  var v = agxCurve((clamp(log2(max(m * c, vec3f(1e-10))), vec3f(-12.47393), vec3f(4.026069)) + 12.47393) / 16.5);
-  // look: a little more contrast and saturation
-  let l = lum(v); v = pow(max(v, vec3f(0.)), vec3f(1.14)); v = l + 1.3 * (v - l) + (pow(l, 1.14) - l);
-  return sat3(mi * v);
-}
-@fragment fn fs(@builtin(position) fc: vec4f) -> @location(0) vec4f {
+` + W_AGX + /*wgsl*/`@fragment fn fs(@builtin(position) fc: vec4f) -> @location(0) vec4f {
   let px = vec2i(fc.xy); let mx = vec2i(textureDimensions(tC)) - 1; let uv = fc.xy / vec2f(textureDimensions(tC));
   var c = textureLoad(tC, px, 0).rgb;
   // mild sharpening against TAA softness
